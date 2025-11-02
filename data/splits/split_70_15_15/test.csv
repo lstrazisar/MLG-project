@@ -612,7 +612,6 @@ Tag,Chromophore,Solvent,Absorption max (nm),Emission max (nm)
 4769,O=C1OC(c2ccccc2)=N/C1=C\c1ccc(N(c2ccc(/C=C3\N=C(c4ccccc4)OC3=O)cc2)c2ccc(/C=C3/N=C(c4ccccc4)OC3=O)cc2)cc1,CS(C)=O,506.0,650.0
 4770,O=C1OC(c2ccccc2)=N/C1=C\c1ccc(N(c2ccc(/C=C3\N=C(c4ccccc4)OC3=O)cc2)c2ccc(/C=C3/N=C(c4ccccc4)OC3=O)cc2)cc1,CC#N,498.0,635.6
 4772,c1ccc(-c2ccc3c4ccc(-c5ccccc5)c5c(-c6ccccc6)ccc(c6cccc2c63)c54)cc1,ClCCl,473.0,500.0
-4777,CN(C)c1cc(C#N)c(N(C)C)c(C#N)c1,gas,379.3626707,486.1448712
 4778,CN(C)c1cc(C#N)c(N(C)C)c(C#N)c1,CC(C)=O,389.8635478,524.9343832
 4779,CN(C)c1cc(C#N)c(N(C)C)c(C#N)c1,CC#N,390.9304144,529.9417064
 4780,CN(C)c1cc(C#N)c(N(C)C)c(C#N)c1,c1ccccc1,395.7261575,519.4805195
