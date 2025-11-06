@@ -4,6 +4,8 @@ import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import AllChem
 import json
+from tqdm import tqdm
+import py3Dmol
 
 def mol_to_xyz(mol, conf_id=0, filename="mol.xyz"):
     atoms = mol.GetAtoms()
@@ -15,47 +17,43 @@ def mol_to_xyz(mol, conf_id=0, filename="mol.xyz"):
             pos = conf.GetAtomPosition(atom.GetIdx())
             f.write(f"{atom.GetSymbol():<2} {pos.x: .5f} {pos.y: .5f} {pos.z: .5f}\n")
 
-dataset = pd.read_csv('./data/clean_chromophore_data.csv')
-dataset['Chromophore'] = dataset['Chromophore'].apply(lambda x: x.replace("/", "%").replace("\\", "$")) # sanitize filenames to not corrupt file saving
-
-# get unique chromophores
-unique_chromophores = dataset['Chromophore'].unique()
 
 
-for smiles in unique_chromophores:
-    print(smiles)
-    quit()
-    mol = Chem.MolFromSmiles(smiles)
-    mol = Chem.AddHs(mol)
+def save_3d(unique_smiles, type_name):
+    for smiles in tqdm(unique_smiles):
+        smiles_clean = smiles.replace("/", "&").replace("\\", "$")
+        if os.path.exists(f"./data/xyz/{type_name}/{smiles_clean}.xyz"):
+            continue
+        mol = Chem.MolFromSmiles(smiles)
+        mol = Chem.AddHs(mol)
 
-    # Generate multiple conformers
-    conformer_ids = AllChem.EmbedMultipleConfs(mol, numConfs=1, params=AllChem.ETKDG())
+        # Generate multiple conformers
+        conformer_ids = AllChem.EmbedMultipleConfs(mol, numConfs=10, params=AllChem.ETKDG())
 
-    energies = []
-    for conf_id in conformer_ids:
-        result = AllChem.UFFOptimizeMolecule(mol, confId=conf_id)
-        ff = AllChem.UFFGetMoleculeForceField(mol, confId=conf_id)
-        energies.append((conf_id, ff.CalcEnergy()))
-    
-    
-    # perform xtb on all conformers, save the best one
-    lowest_energy = 9999999999999
-    best_conf_id = -1
-    for conf_id, energy in energies:
-        # Save each conformer to xyz
-        xyz_path = f"./data/xyz/{name}_conf_{conf_id}.xyz"
-        mol_to_xyz(mol, conf_id=conf_id, filename=xyz_path)
-        if os.path.exists(xyz_path):
-            print(f"Running XTB optimization for {name}...")
-            subprocess.run(["xtb", xyz_path, "--opt", "--gfn", "2", "--chrg", "0", "--uhf", "0", "--json"], check=True)
-            subprocess.run(["mv", f"xtbout.json", f"./data/quantum/singlet/{name}.json"], check=True)
-            print(f"Optimization completed for {name}.")
-            
-            # get the optimized energy from xtb output
-            xtb_output = json.load(open(f"xtbout.json"))
-            optimized_energy = xtb_output['total energy']
-            if optimized_energy < lowest_energy:
-                lowest_energy = optimized_energy
+        lowest_energy = 9999999999999
+        best_conf_id = -1
+        for conf_id in conformer_ids:
+            result = AllChem.UFFOptimizeMolecule(mol, confId=conf_id)
+            ff = AllChem.UFFGetMoleculeForceField(mol, confId=conf_id)
+            energy = ff.CalcEnergy()
+            if energy < lowest_energy:
+                lowest_energy = energy
                 best_conf_id = conf_id
+
+        # Save the best conformer
+        if best_conf_id != -1:
+            mol_to_xyz(mol, conf_id=best_conf_id, filename=f"./data/xyz/{type_name}/{smiles_clean}.xyz")
+
+if __name__ == "__main__":
+    # load dataset
+    dataset = pd.read_csv('./data/clean_chromophore_data.csv')
+
+    # get unique chromophores
+    unique_chromophores = dataset['Chromophore'].unique()
+    save_3d(unique_chromophores, "chromophores")
+    
+    # get unique solvents
+    unique_solvents = dataset['Solvent'].unique()
+    save_3d(unique_solvents, "solvents")
     
     
