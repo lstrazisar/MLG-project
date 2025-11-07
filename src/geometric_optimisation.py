@@ -6,6 +6,7 @@ from rdkit.Chem import AllChem
 import json
 from tqdm import tqdm
 import py3Dmol
+import time
 
 def mol_to_xyz(mol, conf_id=0, filename="mol.xyz"):
     atoms = mol.GetAtoms()
@@ -22,6 +23,7 @@ def mol_to_xyz(mol, conf_id=0, filename="mol.xyz"):
 def save_3d(unique_smiles, type_name):
     for smiles in tqdm(unique_smiles):
         smiles_clean = smiles.replace("/", "&").replace("\\", "$")
+        print(smiles)
         if os.path.exists(f"./data/xyz/{type_name}/{smiles_clean}.xyz"):
             continue
         mol = Chem.MolFromSmiles(smiles)
@@ -33,12 +35,19 @@ def save_3d(unique_smiles, type_name):
         lowest_energy = 9999999999999
         best_conf_id = -1
         for conf_id in conformer_ids:
+            t_start = time.time()
             result = AllChem.UFFOptimizeMolecule(mol, confId=conf_id)
             ff = AllChem.UFFGetMoleculeForceField(mol, confId=conf_id)
             energy = ff.CalcEnergy()
             if energy < lowest_energy:
                 lowest_energy = energy
                 best_conf_id = conf_id
+                
+            t_end = time.time()
+            
+            if t_end - t_start > 60:
+                print(f"Optimization for conf_id {conf_id} took too long, skipping further optimizations.")
+                break
 
         # Save the best conformer
         if best_conf_id != -1:
@@ -49,7 +58,9 @@ if __name__ == "__main__":
     dataset = pd.read_csv('./data/clean_chromophore_data.csv')
 
     # get unique chromophores
+    # sort by length to prioritise smaller molecules
     unique_chromophores = dataset['Chromophore'].unique()
+    unique_chromophores = sorted(unique_chromophores, key=len)
     save_3d(unique_chromophores, "chromophores")
     
     # get unique solvents
