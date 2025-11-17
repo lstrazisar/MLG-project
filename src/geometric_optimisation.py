@@ -23,22 +23,25 @@ def mol_to_xyz(mol, conf_id=0, filename="mol.xyz"):
 def save_3d(unique_smiles, type_name):
     for smiles in tqdm(unique_smiles):
         smiles_clean = smiles.replace("/", "&").replace("\\", "$")
-        print(smiles)
-        if os.path.exists(f"./data/xyz/{type_name}/{smiles_clean}.xyz"):
+        #print(smiles)
+        if os.path.exists(f"./data/xyz/{type_name}/{smiles_clean}.xyz") or smiles in smiles_imposible:
             continue
+        print(smiles)
         mol = Chem.MolFromSmiles(smiles)
         mol = Chem.AddHs(mol)
 
         # Generate multiple conformers
-        conformer_ids = AllChem.EmbedMultipleConfs(mol, numConfs=10, params=AllChem.ETKDG())
+        conformer_ids = AllChem.EmbedMultipleConfs(mol, numConfs=1, params=AllChem.ETKDG())
 
         lowest_energy = 9999999999999
         best_conf_id = -1
+        print([conf_id for conf_id in conformer_ids])
         for conf_id in conformer_ids:
             t_start = time.time()
             result = AllChem.UFFOptimizeMolecule(mol, confId=conf_id)
             ff = AllChem.UFFGetMoleculeForceField(mol, confId=conf_id)
             energy = ff.CalcEnergy()
+            print(energy, smiles)
             if energy < lowest_energy:
                 lowest_energy = energy
                 best_conf_id = conf_id
@@ -56,6 +59,9 @@ def save_3d(unique_smiles, type_name):
 if __name__ == "__main__":
     # load dataset
     dataset = pd.read_csv('./data/clean_chromophore_data.csv')
+    
+    with open("data/without_optimisation.txt") as file:
+        smiles_imposible = file.read().splitlines()
 
     # get unique chromophores
     # sort by length to prioritise smaller molecules
