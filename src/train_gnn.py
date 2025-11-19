@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, GATConv, GINConv, global_mean_pool, global_add_pool
 from torch_geometric.data import Data, Batch
+from torch_geometric.nn.models import SchNet 
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
@@ -31,7 +32,7 @@ def bond_features(bond):
         bond.IsInRing(),
     ]
 
-def mol_to_graph(smiles):
+def mol_to_graph(smiles,super_node=False):
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return None
@@ -41,7 +42,9 @@ def mol_to_graph(smiles):
         atom_features_list.append(atom_features(atom))
     
     x = torch.tensor(atom_features_list, dtype=torch.float)
-    
+    if super_node:
+        super_node_feat = torch.tensor([[0]*7], dtype=torch.float)
+        x = torch.cat([x, super_node_feat], dim=0)
     edge_index = []
     edge_attr = []
     
@@ -55,6 +58,12 @@ def mol_to_graph(smiles):
         bond_feat = bond_features(bond)
         edge_attr.append(bond_feat)
         edge_attr.append(bond_feat)
+
+    if super_node:
+        super_idx = x.size(0) - 1
+        for i in range(mol.GetNumAtoms()):
+            edge_index.append([i, super_idx])
+            edge_attr.append([0.0, 0.0, 0.0])
     
     if len(edge_index) > 0:
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
@@ -66,19 +75,35 @@ def mol_to_graph(smiles):
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
     return data
 
+def read_xyz(filename):
+    """Read XYZ coordinates into a numpy array."""
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+    n_atoms = int(lines[0])
+    coords = []
+    for line in lines[2:2 + n_atoms]:
+        parts = line.split()
+        coords.append([float(x) for x in parts[1:4]])
+    return np.array(coords)
+
+def path_from_smiles(smiles):
+    smiles_modified = smiles.replace("/", "&").replace("\\", "$") 
+    return f"data/xyz/chromophores/{smiles_modified}.xyz"
+
 
 class ChromophoreDataset(Dataset):
     """Dataset for chromophore-solvent pairs"""
     
-    def __init__(self, csv_path):
+    def __init__(self, csv_path, super_node=False):
         self.df = pd.read_csv(csv_path)
         self.valid_indices = []
+        self.super_node = super_node
         
         # Pre-validate all SMILES
         for idx in range(len(self.df)):
             row = self.df.iloc[idx]
-            chromo_graph = mol_to_graph(row['Chromophore'])
-            solvent_graph = mol_to_graph(row['Solvent'])
+            chromo_graph = mol_to_graph(row['Chromophore'], super_node=self.super_node)
+            solvent_graph = mol_to_graph(row['Solvent'], super_node=self.super_node)
             
             if chromo_graph is not None and solvent_graph is not None:
                 self.valid_indices.append(idx)
@@ -91,8 +116,8 @@ class ChromophoreDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[self.valid_indices[idx]]
         
-        chromo_graph = mol_to_graph(row['Chromophore'])
-        solvent_graph = mol_to_graph(row['Solvent'])
+        chromo_graph = mol_to_graph(row['Chromophore'], super_node=self.super_node)
+        solvent_graph = mol_to_graph(row['Solvent'], super_node=self.super_node)
         
         # Target values
         y = torch.tensor([
@@ -129,10 +154,11 @@ class DualGNN(nn.Module):
         self.num_layers = num_layers
         
         # Create GNN layers for chromophore
+        self.schnet_chromo = None
         self.chromo_convs = nn.ModuleList()
         for i in range(num_layers):
             in_dim = node_features if i == 0 else hidden_dim
-            if gnn_type == 'gcn':
+            if gnn_type == 'gcn' or gnn_type == 'gcn+super_node':
                 self.chromo_convs.append(GCNConv(in_dim, hidden_dim))
             elif gnn_type == 'gat':
                 # GAT with 4 attention heads
@@ -147,13 +173,19 @@ class DualGNN(nn.Module):
                     nn.Linear(hidden_dim, hidden_dim)
                 )
                 self.chromo_convs.append(GINConv(mlp))
+            elif gnn_type == 'gcn+schnet':
+                self.chromo_convs.append(GCNConv(in_dim, hidden_dim))
+                self.schnet_chromo = SchNet(hidden_channels=hidden_dim,
+                                    num_filters=hidden_dim,
+                                    num_interactions=num_layers)
         
         if use_solvent:
             # Create GNN layers for solvent
             self.solvent_convs = nn.ModuleList()
+            self.schnet_solvent = None
             for i in range(num_layers):
                 in_dim = node_features if i == 0 else hidden_dim
-                if gnn_type == 'gcn':
+                if gnn_type == 'gcn' or gnn_type == 'gcn+super_node':
                     self.solvent_convs.append(GCNConv(in_dim, hidden_dim))
                 elif gnn_type == 'gat':
                     heads = 4
@@ -166,12 +198,23 @@ class DualGNN(nn.Module):
                         nn.Linear(hidden_dim, hidden_dim)
                     )
                     self.solvent_convs.append(GINConv(mlp))
+                elif gnn_type == 'gcn+schnet':
+                    self.solvent_convs.append(GCNConv(in_dim, hidden_dim))
+                    self.schnet_solvent = SchNet(hidden_channels=hidden_dim,
+                                        num_filters=hidden_dim,
+                                        num_interactions=num_layers)
             
             # Combine and predict
-            self.fc1 = nn.Linear(hidden_dim * 2, hidden_dim)
+            if gnn_type == 'gcn+schnet':
+                self.fc1 = nn.Linear(hidden_dim * 4, hidden_dim)
+            else:
+                self.fc1 = nn.Linear(hidden_dim * 2, hidden_dim)
         else:
             # Only chromophore
-            self.fc1 = nn.Linear(hidden_dim, hidden_dim)
+            if gnn_type == 'gcn+schnet':
+                self.fc1 = nn.Linear(hidden_dim * 2, hidden_dim)
+            else:
+                self.fc1 = nn.Linear(hidden_dim, hidden_dim)
         
         self.fc2 = nn.Linear(hidden_dim, output_dim)
         
@@ -192,8 +235,16 @@ class DualGNN(nn.Module):
             x_c = F.relu(x_c)
             x_c = self.dropout(x_c)
         
+        if self.gnn_type == 'gcn+schnet' and self.schnet_chromo is not None:
+            xyz = chromo_data.pos
+            x_c_schnet = self.schnet_chromo(x_c[:, 0].long(), xyz, batch_c)
+            x_c = torch.cat([x_c, x_c_schnet], dim=1)
+
         # Global pooling
-        if self.gnn_type == 'gin':
+        if self.gnn_type == 'gcn+super_node':
+            indexes = np.append(np.where(np.diff(batch_c) != 0)[0], len(batch_c)-1)
+            x_c = x_c[indexes]
+        elif self.gnn_type == 'gin':
             x_c = global_add_pool(x_c, batch_c)  # GIN typically uses sum pooling
         else:
             x_c = global_mean_pool(x_c, batch_c)
@@ -208,8 +259,16 @@ class DualGNN(nn.Module):
                 x_s = F.relu(x_s)
                 x_s = self.dropout(x_s)
             
+            if self.gnn_type == 'gcn+schnet' and self.schnet_solvent is not None:
+                xyz_s = solvent_data.pos
+                x_s_schnet = self.schnet_solvent(x_s[:, 0].long(), xyz_s, batch_s)
+                x_s = torch.cat([x_s, x_s_schnet], dim=1)
+
             # Global pooling
-            if self.gnn_type == 'gin':
+            if self.gnn_type == 'gcn+super_node':
+                indexes = np.append(np.where(np.diff(batch_s) != 0)[0], len(batch_s)-1)
+                x_s = x_s[indexes]
+            elif self.gnn_type == 'gin':
                 x_s = global_add_pool(x_s, batch_s)
             else:
                 x_s = global_mean_pool(x_s, batch_s)
@@ -295,7 +354,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--hidden-dim', type=int, default=64, help='Hidden dimension')
-    parser.add_argument('--gnn-type', choices=['gcn', 'gat', 'gin'], default='gcn', help='Type of GNN: gcn, gat, or gin')
+    parser.add_argument('--gnn-type', choices=['gcn', 'gat', 'gin','gcn+super_node'], default='gcn', help='Type of GNN: gcn, gat, gin, or gcn+super_node')
     parser.add_argument('--num-layers', type=int, default=3, help='Number of GNN layers')
     parser.add_argument('--no-solvent', action='store_true', help='Use only chromophore (ignore solvent)')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu', help='Device')
@@ -317,9 +376,9 @@ def main():
     
     # Load datasets
     print("Loading datasets...")
-    train_dataset = ChromophoreDataset(train_path)
-    val_dataset = ChromophoreDataset(val_path)
-    test_dataset = ChromophoreDataset(test_path)
+    train_dataset = ChromophoreDataset(train_path, super_node=args.gnn_type == 'gcn+super_node')
+    val_dataset = ChromophoreDataset(val_path, super_node=args.gnn_type == 'gcn+super_node')
+    test_dataset = ChromophoreDataset(test_path, super_node=args.gnn_type == 'gcn+super_node')
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
