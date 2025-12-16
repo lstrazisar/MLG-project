@@ -34,6 +34,15 @@ test_prop = args.test / 100.0
 # Read the CSV file
 df = pd.read_csv(args.input)
 
+# filter out rows that do not have xyz optimization
+import os
+with_xyz = os.listdir('./data/xyz/chromophores/')
+for i, chromophore in enumerate(with_xyz):
+    chromophore = chromophore.split('.')[0].replace('&', '/').replace('$', '\\')
+    with_xyz[i] = chromophore
+    
+df = df[df['Chromophore'].isin(with_xyz)]
+
 # Get unique chromophores
 unique_chromophores = df['Chromophore'].unique()
 
