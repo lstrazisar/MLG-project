@@ -34,6 +34,7 @@ def bond_features(bond):
 
 def mol_to_graph(smiles,super_node=False,position= False, solvent=False):
     mol = Chem.MolFromSmiles(smiles)
+    mol = Chem.AddHs(mol)
     if mol is None:
         return None
     
@@ -222,19 +223,19 @@ class DualGNN(nn.Module):
             
             # Combine and predict
             if gnn_type == 'schnet':
-                self.fc1 = nn.Linear(2, 1)
+                self.fc1 = nn.Linear(2, output_dim)
             else:
                 self.fc1 = nn.Linear(hidden_dim * 2, hidden_dim)
         else:
             # Only chromophore
             if gnn_type == 'schnet':
-                self.fc1 = nn.Linear(1, 1)
+                self.fc1 = nn.Linear(1, output_dim)
             else:
                 self.fc1 = nn.Linear(hidden_dim, hidden_dim)
-        if gnn_type == 'schnet':
-            self.fc2 = nn.Linear(1, output_dim)
-        else:
-            self.fc2 = nn.Linear(hidden_dim, output_dim)
+        # if gnn_type == 'schnet':
+        #     self.fc2 = nn.Linear(1, output_dim)
+        # else:
+        self.fc2 = nn.Linear(hidden_dim, output_dim)
         
         self.dropout = nn.Dropout(0.3)
         
@@ -249,7 +250,6 @@ class DualGNN(nn.Module):
         for i, conv in enumerate(self.chromo_convs):
             if self.gnn_type == 'schnet':
                 # SchNet only takes atomic numbers and positions
-                print(x_c[:, 0].long().shape, chromo_data.pos.shape, batch_c.shape)
                 x_c = conv(x_c[:, 0].long(), chromo_data.pos, batch_c)
             else:
                 x_c = conv(x_c, edge_index_c)
@@ -301,10 +301,12 @@ class DualGNN(nn.Module):
         else:
             # Only chromophore
             x = x_c
-        
-        x = F.relu(self.fc1(x))
-        x = self.dropout(x)
-        x = self.fc2(x)
+        if self.gnn_type == 'schnet':
+            x = self.fc1(x)
+        else:
+            x = F.relu(self.fc1(x))
+            x = self.dropout(x)
+            x = self.fc2(x)
         
         return x
 
