@@ -236,9 +236,9 @@ class DualGNN(nn.Module):
         #     self.fc2 = nn.Linear(1, output_dim)
         # else:
         self.fc2 = nn.Linear(hidden_dim, output_dim)
-        
-        self.dropout = nn.Dropout(0.3)
-        
+
+        self.dropout = nn.Dropout(0.2)
+
         # Batch normalization
         self.batch_norms = nn.ModuleList([nn.BatchNorm1d(hidden_dim) for _ in range(num_layers)])
         if use_solvent:
