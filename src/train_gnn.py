@@ -421,8 +421,8 @@ def main():
         gnn_type=args.gnn_type,
         num_layers=args.num_layers
     ).to(device)
-    
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     criterion = nn.MSELoss()
     
     # Training loop
