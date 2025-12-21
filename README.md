@@ -15,7 +15,7 @@ This repository contains scripts for predicting chromophore absorption and emiss
 ## Installation
 
 ```bash
-pip install torch torch-geometric rdkit-pypi pandas numpy scikit-learn tqdm
+pip install torch torch-geometric rdkit pandas numpy scikit-learn tqdm
 ```
 
 ## Dataset Format
