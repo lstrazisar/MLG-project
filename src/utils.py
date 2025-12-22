@@ -4,6 +4,8 @@ from torch.utils.data import Dataset
 import pandas as pd
 import numpy as np
 from rdkit import Chem
+from rdkit.Chem import Descriptors
+from tqdm import tqdm
 import os
 
 
@@ -107,12 +109,12 @@ def path_from_smiles(smiles, solvent=False):
 class ChromophoreDataset(Dataset):
     """Dataset for chromophore-solvent pairs"""
 
-    def __init__(self, csv_path, super_node=False, position=False):
+    def __init__(self, csv_path, super_node=False, position=False, use_descriptors=False):
         self.df = pd.read_csv(csv_path)
         self.valid_indices = []
         self.super_node = super_node
         self.position = position
-
+        self.use_descriptors = use_descriptors
         # Pre-validate all SMILES
         for idx in range(len(self.df)):
             row = self.df.iloc[idx]
@@ -122,6 +124,9 @@ class ChromophoreDataset(Dataset):
             if chromo_graph is not None and solvent_graph is not None:
                 self.valid_indices.append(idx)
 
+        if self.use_descriptors:
+            self.descriptor_df = featurize_dataframe(self.df.iloc[self.valid_indices], smiles_column='Chromophore')
+        
         print(f"Loaded {len(self.valid_indices)} valid samples from {len(self.df)} total")
 
     def __len__(self):
@@ -132,6 +137,7 @@ class ChromophoreDataset(Dataset):
 
         chromo_graph = mol_to_graph(row['Chromophore'], super_node=self.super_node, position=self.position)
         solvent_graph = mol_to_graph(row['Solvent'], super_node=self.super_node, position=self.position, solvent=True)
+        descriptor_data = self.descriptor_df.iloc[idx].values if self.use_descriptors else None
 
         # Target values
         y = torch.tensor([
@@ -139,15 +145,80 @@ class ChromophoreDataset(Dataset):
             row['Emission max (nm)']
         ], dtype=torch.float)
 
-        return chromo_graph, solvent_graph, y
+        return chromo_graph, solvent_graph, descriptor_data, y
 
 
 def collate_fn(batch):
     """Custom collate function for batching graphs"""
-    chromo_graphs, solvent_graphs, targets = zip(*batch)
+    chromo_graphs, solvent_graphs, descriptor_data_list, targets = zip(*batch)
 
     chromo_batch = Batch.from_data_list(chromo_graphs)
     solvent_batch = Batch.from_data_list(solvent_graphs)
+    descriptor_data_list = torch.tensor(descriptor_data_list, dtype=torch.float) if descriptor_data_list[0] is not None else None
     targets = torch.stack(targets)
 
-    return chromo_batch, solvent_batch, targets
+    return chromo_batch, solvent_batch, descriptor_data_list, targets
+
+
+def compute_rdkit_descriptors(smiles):
+    """
+    Compute RDKit molecular descriptors for a SMILES string.
+    Returns a dictionary of descriptor values.
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    
+    # Get all available descriptors
+    descriptor_names = [desc[0] for desc in Descriptors.descList]
+    descriptor_values = {}
+    
+    for name in descriptor_names:
+        try:
+            calc = getattr(Descriptors, name)
+            descriptor_values[name] = calc(mol)
+        except:
+            descriptor_values[name] = np.nan
+    
+    return descriptor_values
+
+def featurize_dataframe(df, smiles_column='Chromophore', valid_columns=None):
+    """
+    Convert SMILES strings to RDKit descriptor features.
+    If valid_columns is provided, only keep those columns and fill missing with 0.
+    """
+    print(f"Computing RDKit descriptors for {len(df)} molecules...")
+    
+    descriptors_list = []
+    valid_indices = []
+    
+    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Featurizing molecules"):
+        smiles = row[smiles_column]
+        desc = compute_rdkit_descriptors(smiles)
+        if desc is not None:
+            descriptors_list.append(desc)
+            valid_indices.append(idx)
+        else:
+            print(f"Warning: Invalid SMILES at index {idx}: {smiles}")
+    
+    # Create feature dataframe
+    features_df = pd.DataFrame(descriptors_list, index=valid_indices)
+    
+    # Replace infinite values with NaN
+    features_df = features_df.replace([np.inf, -np.inf], np.nan)
+    
+    if valid_columns is None:
+        # Training phase: keep only valid columns (no NaN)
+        features_df = features_df.dropna(axis=1)
+        # drop column Ipc
+        features_df = features_df.drop(columns=['Ipc'])
+        valid_columns = features_df.columns.tolist()
+        
+
+        print(f"Generated {features_df.shape[1]} descriptors for {len(features_df)} valid molecules")
+    else:
+        # Val/Test phase: use only training columns, fill NaN with 0
+        features_df = features_df[valid_columns].fillna(0)
+        print(f"Using {features_df.shape[1]} descriptors (from training) for {len(features_df)} valid molecules")
+    
+    return features_df

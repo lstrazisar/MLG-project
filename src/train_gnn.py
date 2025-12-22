@@ -23,12 +23,14 @@ class DualGNN(nn.Module):
     Supports multiple GNN architectures: GCN, GAT, GIN
     """
 
-    def __init__(self, node_features=7, hidden_dim=64, output_dim=2, use_solvent=True, gnn_type='gcn', num_layers=2):
+    def __init__(self, node_features=7, hidden_dim=64, output_dim=2, use_solvent=True, gnn_type='gcn', num_layers=2, use_descriptors=False, number_of_descriptors=205):
         super(DualGNN, self).__init__()
 
         self.use_solvent = use_solvent
         self.gnn_type = gnn_type
         self.num_layers = num_layers
+        self.use_descriptors = use_descriptors
+        self.number_of_descriptors = number_of_descriptors
 
         # Create GNN layers for chromophore
         self.schnet_chromo = None
@@ -56,8 +58,16 @@ class DualGNN(nn.Module):
                                                 num_filters=hidden_dim,
                                                 num_interactions=num_layers))
                 break
-
-        if use_solvent:
+        
+        if use_descriptors:
+            self.descriptor_fc = nn.Linear(self.number_of_descriptors, hidden_dim * num_layers) # equal neurons as GNN output
+            if gnn_type == 'schnet':
+                self.fc1 = nn.Linear(2, output_dim)
+            else:
+                self.fc1 = nn.Linear(hidden_dim * 2, hidden_dim)
+        
+        # for simplification purpose, we will not implement descriptor handling here
+        elif use_solvent:
             # Create GNN layers for solvent
             self.solvent_convs = nn.ModuleList()
             for i in range(num_layers):
@@ -104,7 +114,7 @@ class DualGNN(nn.Module):
         if use_solvent:
             self.solvent_batch_norms = nn.ModuleList([nn.BatchNorm1d(hidden_dim) for _ in range(num_layers)])
 
-    def forward(self, chromo_data, solvent_data):
+    def forward(self, chromo_data, solvent_data, descriptor_data=None):
         # Process chromophore
         x_c, edge_index_c, batch_c = chromo_data.x, chromo_data.edge_index, chromo_data.batch
         for i, conv in enumerate(self.chromo_convs):
@@ -128,7 +138,12 @@ class DualGNN(nn.Module):
         else:
             x_c = global_mean_pool(x_c, batch_c)
 
-        if self.use_solvent:
+        if self.use_descriptors:
+            x = self.descriptor_fc(descriptor_data)
+            x = F.relu(x)
+            x = self.dropout(x)
+        
+        elif self.use_solvent:
             # Process solvent
             x_s, edge_index_s, batch_s = solvent_data.x, solvent_data.edge_index, solvent_data.batch
 
@@ -173,13 +188,16 @@ def train_epoch(model, loader, optimizer, criterion, device):
     all_preds = []
     all_targets = []
 
-    for chromo_batch, solvent_batch, targets in tqdm(loader, desc="Training"):
+    for chromo_batch, solvent_batch, descriptor_data_list, targets in tqdm(loader, desc="Training"):
         chromo_batch = chromo_batch.to(device)
         solvent_batch = solvent_batch.to(device)
+        descriptor_data_list = descriptor_data_list.to(device) if descriptor_data_list is not None else None
         targets = targets.to(device)
+        
+        #print(descriptor_data_list.size())
 
         optimizer.zero_grad()
-        outputs = model(chromo_batch, solvent_batch)
+        outputs = model(chromo_batch, solvent_batch, descriptor_data_list)
         loss = criterion(outputs, targets)
         loss.backward()
         optimizer.step()
@@ -205,12 +223,13 @@ def evaluate(model, loader, criterion, device):
     all_targets = []
 
     with torch.no_grad():
-        for chromo_batch, solvent_batch, targets in tqdm(loader, desc="Evaluating"):
+        for chromo_batch, solvent_batch, descriptor_data_list, targets in tqdm(loader, desc="Evaluating"):
             chromo_batch = chromo_batch.to(device)
             solvent_batch = solvent_batch.to(device)
+            descriptor_data_list = descriptor_data_list.to(device) if descriptor_data_list is not None else None
             targets = targets.to(device)
 
-            outputs = model(chromo_batch, solvent_batch)
+            outputs = model(chromo_batch, solvent_batch, descriptor_data_list)
             loss = criterion(outputs, targets)
 
             total_loss += loss.item()
@@ -238,6 +257,7 @@ def main():
     parser.add_argument('--gnn-type', choices=['gcn', 'gat', 'gin', 'gcn+super_node', 'schnet'], default='gcn', help='Type of GNN: gcn, gat, gin, gcn+super_node or schnet')
     parser.add_argument('--num-layers', type=int, default=3, help='Number of GNN layers')
     parser.add_argument('--no-solvent', action='store_true', help='Use only chromophore (ignore solvent)')
+    parser.add_argument('--use-descriptors', action='store_true', help='Use RDKit descriptors along with GNN for chromophore')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu', help='Device')
 
     args = parser.parse_args()
@@ -257,9 +277,9 @@ def main():
 
     # Load datasets
     print("Loading datasets...")
-    train_dataset = ChromophoreDataset(train_path, super_node=args.gnn_type == 'gcn+super_node', position=args.gnn_type == 'schnet')
-    val_dataset = ChromophoreDataset(val_path, super_node=args.gnn_type == 'gcn+super_node', position=args.gnn_type == 'schnet')
-    test_dataset = ChromophoreDataset(test_path, super_node=args.gnn_type == 'gcn+super_node', position=args.gnn_type == 'schnet')
+    train_dataset = ChromophoreDataset(train_path, super_node=args.gnn_type == 'gcn+super_node', position=args.gnn_type == 'schnet', use_descriptors=args.use_descriptors)
+    val_dataset = ChromophoreDataset(val_path, super_node=args.gnn_type == 'gcn+super_node', position=args.gnn_type == 'schnet', use_descriptors=args.use_descriptors)
+    test_dataset = ChromophoreDataset(test_path, super_node=args.gnn_type == 'gcn+super_node', position=args.gnn_type == 'schnet', use_descriptors=args.use_descriptors)
 
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
@@ -275,6 +295,8 @@ def main():
         hidden_dim=args.hidden_dim,
         use_solvent=not args.no_solvent,
         gnn_type=args.gnn_type,
+        use_descriptors=args.use_descriptors,
+        number_of_descriptors=train_dataset.descriptor_df.shape[1] if args.use_descriptors else 0,
         num_layers=args.num_layers
     ).to(device)
 
