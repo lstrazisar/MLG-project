@@ -1,0 +1,5 @@
+{
+  "test_loss": 1400.8309106445313,
+  "test_mae_absorption": 23.79785919189453,
+  "test_mae_emission": 30.85256004333496
+}
