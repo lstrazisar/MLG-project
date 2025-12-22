@@ -1,0 +1,12 @@
+req: py3.12
+
+python -m venv venv
+. venv/bin/activate
+
+pip install setuptools wheel
+^^^ to nism sure da rabim ...
+pip install torch==2.8.0
+pip install torch-geometric
+pip install --only-binary=:all:  torch-cluster  \
+  -f https://data.pyg.org/whl/torch-2.8.0+cu128.html
+pip install rdkit pandas numpy scikit-learn tqdm
