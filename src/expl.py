@@ -187,6 +187,7 @@ if __name__ == "__main__":
     parser.add_argument('--num-layers', type=int, default=3, help='Number of GNN layers')
     parser.add_argument('--no-solvent', action='store_true', help='Use only chromophore (ignore solvent)')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu', help='Device')
+    parser.add_argument('--method', choices=['atom', 'atom_mask', 'bond'], default='atom', help='Attribution method: atom, atom_mask, or bond')
 
     args = parser.parse_args()
 
@@ -207,7 +208,7 @@ if __name__ == "__main__":
     test_dataset = ChromophoreDataset(test_path, super_node=args.gnn_type == 'gcn+super_node', position=args.gnn_type == 'schnet')
 
     # Suppose you already have a sample from your dataset:
-    num = 1271
+    num = 314
     chromo_data, solvent_data, y = test_dataset[num]
 
     def load_trained_model(checkpoint_path: str, device: torch.device):
@@ -235,19 +236,18 @@ if __name__ == "__main__":
 
     model.to(device)
 
-    delete_atom = False
-    # if delete_atom:
-    #     base_pred, chromo_imp, solvent_imp = atom_removal_attribution(
-    #         model, chromo_data, solvent_data, device, explain_solvent=True
-    #     )
-    # else:
-    #     base_pred, chromo_imp, solvent_imp = atom_mask_attribution_schnet(
-    #         model, chromo_data, solvent_data, device, z_mask=1, explain_solvent=True
-    #     )
-
-    base_pred, bond_imp = bond_removal_attribution(
-        model, chromo_data, solvent_data, device
-    )
+    if args.method == "atom":
+        base_pred, chromo_imp, solvent_imp = atom_removal_attribution(
+            model, chromo_data, solvent_data, device, explain_solvent=True
+        )
+    elif args.method == "atom_mask":
+        base_pred, chromo_imp, solvent_imp = atom_mask_attribution_schnet(
+            model, chromo_data, solvent_data, device, z_mask=1, explain_solvent=True
+        )
+    else:
+        base_pred, bond_imp = bond_removal_attribution(
+            model, chromo_data, solvent_data, device
+        )
 
     # chromo_imp[:,0] = absorption importance per atom
     # chromo_imp[:,1] = emission importance per atom
@@ -258,31 +258,31 @@ if __name__ == "__main__":
 
     # Visualize absorption (index 0) for chromophore
     draw_hydrogens = True
-    # if draw_hydrogens:
-    #     png_bytes = draw_mol_importance(
-    #         smiles=test_dataset.df.iloc[test_dataset.valid_indices[num]]["Chromophore"],
-    #         atom_importance=chromo_imp[:, 0].tolist(),
-    #         title="Chromo atom importance (Absorption)"
-    #     )
-    # else:
-    #     smiles = test_dataset.df.iloc[test_dataset.valid_indices[num]]["Chromophore"]
-    #     mol_noHs, heavy_imp = collapse_H_to_heavy(smiles, chromo_imp[:, 0].tolist())
-    #     # draw using no-H SMILES (same smiles), but with add_hs=False and importance length = heavy atoms
-    #     png_bytes = draw_mol_importance(
-    #         smiles=smiles,
-    #         atom_importance=heavy_imp,
-    #         title="Chromo atom importance (Absorption, heavy atoms)",
-    #         add_hs=False
-    #     )
+    if not args.method == "bond":
+        if draw_hydrogens:
+            png_bytes = draw_mol_importance(
+                smiles=test_dataset.df.iloc[test_dataset.valid_indices[num]]["Chromophore"],
+                atom_importance=chromo_imp[:, 0].tolist(),
+                title="Chromo atom importance (Absorption)"
+            )
+        else:
+            smiles = test_dataset.df.iloc[test_dataset.valid_indices[num]]["Chromophore"]
+            mol_noHs, heavy_imp = collapse_H_to_heavy(smiles, chromo_imp[:, 0].tolist())
+            # draw using no-H SMILES (same smiles), but with add_hs=False and importance length = heavy atoms
+            png_bytes = draw_mol_importance(
+                smiles=smiles,
+                atom_importance=heavy_imp,
+                title="Chromo atom importance (Absorption, heavy atoms)",
+                add_hs=False
+            )
 
     smiles = test_dataset.df.iloc[test_dataset.valid_indices[num]]["Chromophore"]
     # mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
 
-    png = draw_bond_importance(smiles, bond_imp)
-    with open(f"bond_importance_abs_{num}.png", "wb") as f:
-        f.write(png)
-
-    #! za not bonds
-    # with open(f"chromo_abs_importance_notatom_{num}.png", "wb") as f:
-    #     f.write(png_bytes)
-    print(f"Saved chromo_abs_importance_{num}.png")
+    if args.method == "bond":
+        png = draw_bond_importance(smiles, bond_imp)
+        with open(f"bond_importance_abs_{num}.png", "wb") as f:
+            f.write(png)
+    else:
+        with open(f"chromo_abs_importance_{num}.png", "wb") as f:
+            f.write(png_bytes)
