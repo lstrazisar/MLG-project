@@ -1,15 +1,23 @@
-import torch
-from torch_geometric.data import Data, Batch
-from torch.utils.data import Dataset
-import pandas as pd
+import os
+
 import numpy as np
+import pandas as pd
+import torch
+
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 from tqdm import tqdm
-import os
+from torch.utils.data import Dataset
+from torch_geometric.data import Data, Batch
 
 
 def atom_features(atom):
+    """
+    Generate atom features for a given RDKit atom.
+
+    :param atom: RDKit atom object
+    :return: List of atom features
+    """
     return [
         atom.GetAtomicNum(),
         atom.GetDegree(),
@@ -22,6 +30,12 @@ def atom_features(atom):
 
 
 def bond_features(bond):
+    """
+    Generate bond features for a given RDKit bond.
+
+    :param bond: RDKit bond object
+    :return: List of bond features
+    """
     return [
         bond.GetBondTypeAsDouble(),
         bond.GetIsConjugated(),
@@ -29,7 +43,15 @@ def bond_features(bond):
     ]
 
 
-def mol_to_graph(smiles, super_node=False, position=False, solvent=False):
+def mol_to_graph(smiles, position=False, solvent=False):
+    """
+    Convert a molecule (SMILES string) to a graph (PyTorch Geometric Data object).
+
+    :param smiles: SMILES string
+    :param position: Boolean indicating if 3D positions should be included
+    :param solvent: Boolean indicating if the molecule is a solvent
+    :return: PyTorch Geometric Data object or None if conversion fails
+    """
     mol = Chem.MolFromSmiles(smiles)
     mol = Chem.AddHs(mol)
     if mol is None:
@@ -40,9 +62,6 @@ def mol_to_graph(smiles, super_node=False, position=False, solvent=False):
         atom_features_list.append(atom_features(atom))
 
     x = torch.tensor(atom_features_list, dtype=torch.float)
-    if super_node:
-        super_node_feat = torch.tensor([[0]*7], dtype=torch.float)
-        x = torch.cat([x, super_node_feat], dim=0)
     edge_index = []
     edge_attr = []
 
@@ -57,16 +76,11 @@ def mol_to_graph(smiles, super_node=False, position=False, solvent=False):
         edge_attr.append(bond_feat)
         edge_attr.append(bond_feat)
 
-    if super_node:
-        super_idx = x.size(0) - 1
-        for i in range(mol.GetNumAtoms()):
-            edge_index.append([i, super_idx])
-            edge_attr.append([0.0, 0.0, 0.0])
-
     if len(edge_index) > 0:
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
         edge_attr = torch.tensor(edge_attr, dtype=torch.float)
     else:
+        # handle molecules with no bonds (single atom) - shapes must still be compatible with PyG expectations
         edge_index = torch.empty((2, 0), dtype=torch.long)
         edge_attr = torch.empty((0, 3), dtype=torch.float)
 
@@ -78,7 +92,6 @@ def mol_to_graph(smiles, super_node=False, position=False, solvent=False):
             coords = read_xyz(xyz_path)
             pos = torch.tensor(coords, dtype=torch.float)
             if pos.size(0) != x.size(0):
-                # print(f"Position size {pos.size(0)} does not match number of atoms {x.size(0)} for SMILES: {smiles} for atoms {[atom.GetSymbol() for atom in mol.GetAtoms()]}")
                 return None
         data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, pos=pos)
     else:
@@ -87,18 +100,31 @@ def mol_to_graph(smiles, super_node=False, position=False, solvent=False):
 
 
 def read_xyz(filename):
-    """Read XYZ coordinates into a numpy array."""
+    """
+    Read XYZ coordinates into a numpy array.
+
+    :param filename: Path to the XYZ file
+    :return: Numpy array of shape (n_atoms, 3) with atomic coordinates
+    """
     with open(filename, 'r') as f:
         lines = f.readlines()
     n_atoms = int(lines[0])
     coords = []
     for line in lines[2:2 + n_atoms]:
         parts = line.split()
+        # parts[0] is the atom type, we only need coordinates
         coords.append([float(x) for x in parts[1:4]])
     return np.array(coords)
 
 
 def path_from_smiles(smiles, solvent=False):
+    """
+    Generate file path for XYZ coordinates based on SMILES string.
+
+    :param smiles: SMILES string
+    :param solvent: Boolean indicating if it's a solvent
+    :return: File path to the XYZ file
+    """
     smiles_modified = smiles.replace("/", "&").replace("\\", "$")
     if solvent:
         return f"data/xyz/solvents/{smiles_modified}.xyz"
@@ -109,24 +135,28 @@ def path_from_smiles(smiles, solvent=False):
 class ChromophoreDataset(Dataset):
     """Dataset for chromophore-solvent pairs"""
 
-    def __init__(self, csv_path, super_node=False, position=False, use_descriptors=False):
+    def __init__(self, csv_path, position=False, use_descriptors=False):
+        """
+        :param csv_path: Path to the CSV file containing data
+        :param position: Boolean indicating if 3D positions should be included
+        :param use_descriptors: Boolean indicating if RDKit descriptors should be used
+        """
         self.df = pd.read_csv(csv_path)
         self.valid_indices = []
-        self.super_node = super_node
         self.position = position
         self.use_descriptors = use_descriptors
-        # Pre-validate all SMILES
+        # pre-validate all SMILES strings
         for idx in range(len(self.df)):
             row = self.df.iloc[idx]
-            chromo_graph = mol_to_graph(row['Chromophore'], super_node=self.super_node, position=self.position)
-            solvent_graph = mol_to_graph(row['Solvent'], super_node=self.super_node, position=self.position, solvent=True)
+            chromo_graph = mol_to_graph(row['Chromophore'], position=self.position)
+            solvent_graph = mol_to_graph(row['Solvent'], position=self.position, solvent=True)
 
             if chromo_graph is not None and solvent_graph is not None:
                 self.valid_indices.append(idx)
 
         if self.use_descriptors:
             self.descriptor_df = featurize_dataframe(self.df.iloc[self.valid_indices], smiles_column='Chromophore')
-        
+
         print(f"Loaded {len(self.valid_indices)} valid samples from {len(self.df)} total")
 
     def __len__(self):
@@ -135,8 +165,8 @@ class ChromophoreDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[self.valid_indices[idx]]
 
-        chromo_graph = mol_to_graph(row['Chromophore'], super_node=self.super_node, position=self.position)
-        solvent_graph = mol_to_graph(row['Solvent'], super_node=self.super_node, position=self.position, solvent=True)
+        chromo_graph = mol_to_graph(row['Chromophore'], position=self.position)
+        solvent_graph = mol_to_graph(row['Solvent'], position=self.position, solvent=True)
         descriptor_data = self.descriptor_df.iloc[idx].values if self.use_descriptors else None
 
         # Target values
@@ -149,7 +179,12 @@ class ChromophoreDataset(Dataset):
 
 
 def collate_fn(batch):
-    """Custom collate function for batching graphs"""
+    """
+    Custom collate function for batching graphs.
+
+    :param batch: List of tuples (chromo_graph, solvent_graph, descriptor_data, target)
+    :return: Batched chromo_graphs, solvent_graphs, descriptor_data, targets
+    """
     chromo_graphs, solvent_graphs, descriptor_data_list, targets = zip(*batch)
 
     chromo_batch = Batch.from_data_list(chromo_graphs)
@@ -163,35 +198,43 @@ def collate_fn(batch):
 def compute_rdkit_descriptors(smiles):
     """
     Compute RDKit molecular descriptors for a SMILES string.
-    Returns a dictionary of descriptor values.
+
+    :param smiles: SMILES string
+    :return: Dictionary of descriptor values
     """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return None
-    
-    # Get all available descriptors
+
+    # get all available descriptors
     descriptor_names = [desc[0] for desc in Descriptors.descList]
     descriptor_values = {}
-    
+
     for name in descriptor_names:
         try:
             calc = getattr(Descriptors, name)
             descriptor_values[name] = calc(mol)
         except:
             descriptor_values[name] = np.nan
-    
+
     return descriptor_values
+
 
 def featurize_dataframe(df, smiles_column='Chromophore', valid_columns=None):
     """
     Convert SMILES strings to RDKit descriptor features.
-    If valid_columns is provided, only keep those columns and fill missing with 0.
+    If valid_columns is provided, only keep those columns and fill missing ones with 0.
+
+    :param df: Pandas DataFrame with SMILES strings
+    :param smiles_column: Column name containing SMILES strings
+    :param valid_columns: List of valid columns to keep (for val/test sets)
+    :return: DataFrame of RDKit descriptors
     """
     print(f"Computing RDKit descriptors for {len(df)} molecules...")
-    
+
     descriptors_list = []
     valid_indices = []
-    
+
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Featurizing molecules"):
         smiles = row[smiles_column]
         desc = compute_rdkit_descriptors(smiles)
@@ -200,25 +243,21 @@ def featurize_dataframe(df, smiles_column='Chromophore', valid_columns=None):
             valid_indices.append(idx)
         else:
             print(f"Warning: Invalid SMILES at index {idx}: {smiles}")
-    
-    # Create feature dataframe
+
     features_df = pd.DataFrame(descriptors_list, index=valid_indices)
-    
-    # Replace infinite values with NaN
     features_df = features_df.replace([np.inf, -np.inf], np.nan)
-    
+
     if valid_columns is None:
-        # Training phase: keep only valid columns (no NaN)
+        # training phase: keep only valid columns (no NaN)
         features_df = features_df.dropna(axis=1)
         # drop column Ipc
         features_df = features_df.drop(columns=['Ipc'])
         valid_columns = features_df.columns.tolist()
-        
 
         print(f"Generated {features_df.shape[1]} descriptors for {len(features_df)} valid molecules")
     else:
-        # Val/Test phase: use only training columns, fill NaN with 0
+        # val/test phase: use only training columns, fill NaN with 0
         features_df = features_df[valid_columns].fillna(0)
         print(f"Using {features_df.shape[1]} descriptors (from training) for {len(features_df)} valid molecules")
-    
+
     return features_df
