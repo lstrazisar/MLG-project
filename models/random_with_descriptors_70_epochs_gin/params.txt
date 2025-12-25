@@ -1,0 +1,5 @@
+python3  -m src.train_gnn     --data-dir ./data/splits/only_with_3d/random_split_80_10_10/     --output-
+dir ./models/random_with_descriptors_70_epochs_gin     --gnn-type gin     --num-layers 2  --use-descriptors   --hidden-dim 128     --epochs 70     --batch
+-size 64     --lr 0.001
+
+dropout = 0.2
