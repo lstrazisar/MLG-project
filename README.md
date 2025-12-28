@@ -1,22 +1,25 @@
-# MLG-project
-
 # Chromophore Property Prediction with Graph Neural Networks
 
-This repository contains scripts for predicting chromophore absorption and emission wavelengths using Graph Neural Networks (GNNs). The models process molecular structures (SMILES) of chromophores and solvents to predict optical properties.
-
-## Features
-
-- **Multiple GNN Architectures**: Support for GCN, GAT, and GIN
-- **Dual-molecule processing**: Separate encoding for chromophore and solvent
-- **Flexible architecture**: Configurable hidden dimensions, number of layers, and dropout
-- **Comprehensive evaluation**: Reports MAE for both absorption and emission wavelengths
-- **Data splitting**: Ensures all samples with the same chromophore stay in the same split
+This repository contains the code for predicting chromophore absorption and emission wavelengths using Graph Neural Networks (GNNs), developed as part of the project for the course Machine Learning with Graphs. The models process molecular structures (SMILES) of chromophores and solvents to predict optical properties.
 
 ## Installation
 
+We recommend running the code on Linux. The necessary dependencies can be installed via:
+
 ```bash
-pip install torch torch-geometric rdkit pandas numpy scikit-learn tqdm
+pip install rdkit pandas numpy scikit-learn tqdm torch==2.8.0 torch-geometric
+pip install --only-binary=:all:  torch-cluster  \
+  -f https://data.pyg.org/whl/torch-2.8.0+cu128.html
 ```
+
+## Features
+
+- **Multiple GNN Architectures**: Support for GCN, GAT, GIN and SchNet
+- **Dual-molecule processing**: Separate encoding for chromophore and solvent
+- **Flexible architecture**: Configurable hidden dimensions, number of layers, and dropout
+- **Comprehensive evaluation**: Reports MAE for both absorption and emission wavelengths
+- **Data splitting**: Ensures all samples with the same chromophore stay in the same split (scaffold splitting)
+
 
 ## Dataset Format
 
@@ -26,6 +29,8 @@ Your CSV files should contain the following columns:
 - `Solvent`: SMILES string of the solvent molecule
 - `Absorption max (nm)`: Target absorption wavelength
 - `Emission max (nm)`: Target emission wavelength
+
+An example of such a dataset is our own, on which we trained the models - `data/clean_chromophore_data.csv`.
 
 ## Usage
 
@@ -53,13 +58,15 @@ python3 ./src/split_dataset.py \
 
 This creates three files: `train.csv`, `val.csv`, and `test.csv` in the output directory.
 
+Alternatively, use any of our own splits in `data/splits`.
+
 ### Step 2: Train the GNN Model
 
-Train a GNN model on the split data:
+Train a GNN model on the split data. Example:
 
 ```bash
 python3 ./src/train_gnn.py \
-    --data-dir ./data/splits \
+    --data-dir ./data/splits/with_3d_split_90_5_5 \
     --output-dir ./models \
     --gnn-type gin \
     --num-layers 3 \
@@ -71,12 +78,12 @@ python3 ./src/train_gnn.py \
 
 **Arguments:**
 - `--data-dir, -d`: Directory containing train.csv, val.csv, test.csv (required)
-- `--output-dir, -o`: Output directory for models (default: ./models)
-- `--gnn-type`: Type of GNN architecture - `gcn`, `gat`, or `gin` (default: gcn)
+- `--output-dir, -o`: Output directory for models (default: `./models`)
+- `--gnn-type`: Type of GNN architecture - `gcn`, `gat`, `gin` or 'schnet' (default: gcn)
 - `--num-layers`: Number of GNN layers (default: 3)
-- `--hidden-dim`: Hidden dimension size (default: 64)
+- `--hidden-dim`: Hidden dimension size (default: 128)
 - `--epochs`: Number of training epochs (default: 100)
-- `--batch-size`: Batch size (default: 32)
+- `--batch-size`: Batch size (default: 64)
 - `--lr`: Learning rate (default: 0.001)
 - `--no-solvent`: Use only chromophore, ignore solvent (for baseline)
 - `--device`: Device to use - `cuda` or `cpu` (default: auto-detect)
@@ -108,21 +115,6 @@ python train_gnn.py -d ./splits --gnn-type gat --num-layers 3 --hidden-dim 128
 python train_gnn.py -d ./splits --gnn-type gin --num-layers 4 --hidden-dim 128
 ```
 
-## Example Workflows
-
-### Baseline: Chromophore Only
-Test if solvent information is helpful:
-
-```bash
-# Train without solvent
-python3 ./src/train_gnn.py -d ./data/splits --no-solvent --output-dir ./models/baseline
-
-# Train with solvent
-python3 ./src/train_gnn.py -d ./data/splits --output-dir ./models/full
-```
-
-
-
 ## Model Architecture Details
 
 The `DualGNN` model:
@@ -135,7 +127,7 @@ Each GNN layer includes:
 - Graph convolution (GCN/GAT/GIN)
 - Batch normalization
 - ReLU activation
-- Dropout (0.3)
+- Dropout (0.2)
 
 ## Output Interpretation
 
