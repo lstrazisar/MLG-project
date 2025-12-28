@@ -1,14 +1,20 @@
-import subprocess
 import os
 import pandas as pd
-from rdkit import Chem
-from rdkit.Chem import AllChem
-import json
-from tqdm import tqdm
-import py3Dmol
 import time
 
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from tqdm import tqdm
+
+
 def mol_to_xyz(mol, conf_id=0, filename="mol.xyz"):
+    """
+    Save an RDKit molecule to an XYZ file.
+
+    :param mol: RDKit molecule object
+    :param conf_id: Conformer ID to use for coordinates
+    :param filename: Output filename
+    """
     atoms = mol.GetAtoms()
     conf = mol.GetConformer(conf_id)
     with open(filename, 'w') as f:
@@ -19,18 +25,22 @@ def mol_to_xyz(mol, conf_id=0, filename="mol.xyz"):
             f.write(f"{atom.GetSymbol():<2} {pos.x: .5f} {pos.y: .5f} {pos.z: .5f}\n")
 
 
-
 def save_3d(unique_smiles, type_name):
+    """
+    Generate and save 3D structures for a list of SMILES strings.
+
+    :param unique_smiles: List of SMILES strings
+    :param type_name: Type name for directory (e.g., "chromophores or "solvents")
+    """
     for smiles in tqdm(unique_smiles):
         smiles_clean = smiles.replace("/", "&").replace("\\", "$")
-        #print(smiles)
         if os.path.exists(f"./data/xyz/{type_name}/{smiles_clean}.xyz") or smiles in smiles_imposible:
             continue
         print(smiles)
         mol = Chem.MolFromSmiles(smiles)
         mol = Chem.AddHs(mol)
 
-        # Generate multiple conformers
+        # generate multiple conformers
         conformer_ids = AllChem.EmbedMultipleConfs(mol, numConfs=1, params=AllChem.ETKDG())
 
         lowest_energy = 9999999999999
@@ -38,39 +48,37 @@ def save_3d(unique_smiles, type_name):
         print([conf_id for conf_id in conformer_ids])
         for conf_id in conformer_ids:
             t_start = time.time()
-            result = AllChem.UFFOptimizeMolecule(mol, confId=conf_id)
             ff = AllChem.UFFGetMoleculeForceField(mol, confId=conf_id)
             energy = ff.CalcEnergy()
             print(energy, smiles)
             if energy < lowest_energy:
                 lowest_energy = energy
                 best_conf_id = conf_id
-                
+
             t_end = time.time()
-            
+
             if t_end - t_start > 60:
                 print(f"Optimization for conf_id {conf_id} took too long, skipping further optimizations.")
                 break
 
-        # Save the best conformer
+        # save the best conformer
         if best_conf_id != -1:
             mol_to_xyz(mol, conf_id=best_conf_id, filename=f"./data/xyz/{type_name}/{smiles_clean}.xyz")
+
 
 if __name__ == "__main__":
     # load dataset
     dataset = pd.read_csv('./data/clean_chromophore_data.csv')
-    
+
     with open("data/without_optimisation.txt") as file:
         smiles_imposible = file.read().splitlines()
 
     # get unique chromophores
-    # sort by length to prioritise smaller molecules
+    # sort by length to prioritize smaller molecules
     unique_chromophores = dataset['Chromophore'].unique()
     unique_chromophores = sorted(unique_chromophores, key=len)
     save_3d(unique_chromophores, "chromophores")
-    
+
     # get unique solvents
     unique_solvents = dataset['Solvent'].unique()
     save_3d(unique_solvents, "solvents")
-    
-    
