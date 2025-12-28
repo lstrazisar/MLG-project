@@ -183,7 +183,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train GNN for chromophore property prediction')
     parser.add_argument('--data-dir', '-d', required=True, help='Directory containing train.csv, val.csv, test.csv')
     parser.add_argument('--hidden-dim', type=int, default=64, help='Hidden dimension')
-    parser.add_argument('--gnn-type', choices=['gcn', 'gat', 'gin', 'gcn+super_node', 'schnet'], default='gcn', help='Type of GNN: gcn, gat, gin, gcn+super_node or schnet')
+    parser.add_argument('--gnn-type', choices=['gcn', 'gat', 'gin', 'schnet'], default='gcn', help='Type of GNN: gcn, gat, gin or schnet')
     parser.add_argument('--num-layers', type=int, default=3, help='Number of GNN layers')
     parser.add_argument('--no-solvent', action='store_true', help='Use only chromophore (ignore solvent)')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu', help='Device')
@@ -203,13 +203,13 @@ if __name__ == "__main__":
 
     # Load datasets
     print("Loading datasets...")
-    # train_dataset = ChromophoreDataset(train_path, super_node=args.gnn_type == 'gcn+super_node', position=args.gnn_type == 'schnet')
-    # val_dataset = ChromophoreDataset(val_path, super_node=args.gnn_type == 'gcn+super_node', position=args.gnn_type == 'schnet')
-    test_dataset = ChromophoreDataset(test_path, super_node=args.gnn_type == 'gcn+super_node', position=args.gnn_type == 'schnet')
+    # train_dataset = ChromophoreDataset(train_path, position=args.gnn_type == 'schnet')
+    # val_dataset = ChromophoreDataset(val_path, position=args.gnn_type == 'schnet')
+    test_dataset = ChromophoreDataset(test_path, position=args.gnn_type == 'schnet')
 
     # Suppose you already have a sample from your dataset:
-    num = 314
-    chromo_data, solvent_data, y = test_dataset[num]
+    num = 24
+    chromo_data, solvent_data, desc, y = test_dataset[num]
 
     def load_trained_model(checkpoint_path: str, device: torch.device):
         checkpoint = torch.load(checkpoint_path, map_location=device)
