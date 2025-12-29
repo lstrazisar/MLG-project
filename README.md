@@ -65,7 +65,7 @@ Alternatively, use any of our own splits in `data/splits`.
 Train a GNN model on the split data. Example:
 
 ```bash
-python3 ./src/train_gnn.py \
+python3 -m src.train_gnn \
     --data-dir ./data/splits/scaffold_split_80_10_10 \
     --output-dir ./models \
     --gnn-type gin \
@@ -100,19 +100,19 @@ Training automatically evaluates on the test set and saves:
 ### GCN (Graph Convolutional Network)
 
 ```bash
-python train_gnn.py -d ./splits/scaffold_split_80_10_10 --gnn-type gcn --num-layers 2 --hidden-dim 64
+python3 -m src.train_gnn -d ./splits/scaffold_split_80_10_10 --gnn-type gcn --num-layers 2 --hidden-dim 64
 ```
 
 ### GAT (Graph Attention Network)
 
 ```bash
-python train_gnn.py -d ./splits/scaffold_split_80_10_10 --gnn-type gat --num-layers 3 --hidden-dim 128
+python3 -m src.train_gnn -d ./splits/scaffold_split_80_10_10 --gnn-type gat --num-layers 3 --hidden-dim 128
 ```
 
 ### GIN (Graph Isomorphism Network)
 
 ```bash
-python train_gnn.py -d ./splits/scaffold_split_80_10_10 --gnn-type gin --num-layers 4 --hidden-dim 128
+python3 -m src.train_gnn -d ./splits/scaffold_split_80_10_10 --gnn-type gin --num-layers 4 --hidden-dim 128
 ```
 
 ## Model Architecture Details
