@@ -59,8 +59,6 @@ def scaffold_split(df, smiles_column, train_prop, val_prop, test_prop, seed):
     if invalid_count > 0:
         print(f"Warning: {invalid_count} molecules had invalid SMILES or could not generate scaffolds")
 
-    # sort scaffolds by size (number of molecules) in descending order
-    # scaffold_sets = sorted(scaffolds.values(), key=len, reverse=True)
     scaffold_sets = list(scaffolds.values())
 
     # calculate target sizes
