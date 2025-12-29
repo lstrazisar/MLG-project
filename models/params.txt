@@ -1,1 +1,0 @@
-python3 ./src/train_gnn.py     --data-dir ./data/splits/with_3d_split_70_15_15/     --output-dir ./models_schnet_30_hyp   --gnn-type schnet    --num-layers 3     --hidden-dim 128     --epochs 30     --batch-size 64     --lr 0.001

@@ -1,1 +1,0 @@
-python3  -m src.train_gnn     --data-dir ./data/splits/random_with3d_split_80_10_10/     --output-dir ./models/poskus     --gnn-type gin     --num-layers 2     --hidden-dim 128     --epochs 30     --batch-size 32     --lr 0.001
