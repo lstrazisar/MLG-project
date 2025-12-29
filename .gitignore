@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 models_*
 *_models
+plots.ipynb
+snippets/*

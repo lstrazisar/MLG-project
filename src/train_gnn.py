@@ -64,7 +64,7 @@ class DualGNN(nn.Module):
                 break
 
         if use_descriptors:
-            self.descriptor_fc = nn.Linear(self.number_of_descriptors, hidden_dim * num_layers)  # equal neurons as GNN output
+            self.descriptor_fc = nn.Linear(self.number_of_descriptors, hidden_dim)  # equal neurons as GNN output
             if gnn_type == 'schnet':
                 self.fc1 = nn.Linear(2, output_dim)
             else:
@@ -149,9 +149,10 @@ class DualGNN(nn.Module):
             x_c = global_mean_pool(x_c, batch_c)
 
         if self.use_descriptors:
-            x = self.descriptor_fc(descriptor_data)
-            x = F.relu(x)
-            x = self.dropout(x)
+            x_d = self.descriptor_fc(descriptor_data)
+            x_d = F.relu(x_d)
+            x_d = self.dropout(x_d)
+            x = torch.cat([x_c, x_d], dim=1)
 
         elif self.use_solvent:
             # process solvent
